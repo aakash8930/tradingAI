@@ -1,4 +1,4 @@
-# backtest.py – Day 4.8 Capital & Risk Engine
+# backtest.py
 
 import ccxt
 import pandas as pd
