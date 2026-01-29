@@ -2,15 +2,15 @@ import torch
 import ta
 import joblib
 import pandas as pd
-import numpy as np
 
+# ---------------- LOAD MODEL ----------------
 model = torch.nn.Sequential(
-    torch.nn.Linear(6,32),
+    torch.nn.Linear(6, 32),
     torch.nn.ReLU(),
-    torch.nn.Linear(32,16),
+    torch.nn.Linear(32, 16),
     torch.nn.ReLU(),
-    torch.nn.Linear(16,1),
-    torch.nn.Sigmoid()
+    torch.nn.Linear(16, 1),
+    torch.nn.Sigmoid(),
 )
 
 model.load_state_dict(torch.load("ai_model.pt", map_location="cpu"))
@@ -18,40 +18,51 @@ model.eval()
 
 scaler = joblib.load("scaler.save")
 
-
-def prepare_features(df):
+# ---------------- FEATURES ----------------
+def prepare_features(df: pd.DataFrame):
     df = df.copy()
-    df["ema_fast"] = ta.trend.EMAIndicator(df["close"],9).ema_indicator()
-    df["ema_slow"] = ta.trend.EMAIndicator(df["close"],21).ema_indicator()
-    df["rsi"] = ta.momentum.RSIIndicator(df["close"],14).rsi()
+
+    df["ema_fast"] = ta.trend.EMAIndicator(df["close"], 9).ema_indicator()
+    df["ema_slow"] = ta.trend.EMAIndicator(df["close"], 21).ema_indicator()
+    df["rsi"] = ta.momentum.RSIIndicator(df["close"], 14).rsi()
+
     df["returns"] = df["close"].pct_change()
     df["volatility"] = df["returns"].rolling(10).std()
     df["ema_dist"] = (df["ema_fast"] - df["ema_slow"]) / df["close"]
+
     df.dropna(inplace=True)
     return df
 
-
-def predict_probability(df):
-    if df is None or len(df) < 5:
+# ---------------- PREDICTION ----------------
+def predict_probability(df: pd.DataFrame) -> float:
+    if df is None or len(df) == 0:
         return 0.5
 
-    r = df.iloc[-1]
+    row = df.iloc[-1]
+
     X = [[
-        r["ema_fast"],
-        r["ema_slow"],
-        r["rsi"],
-        r["returns"],
-        r["volatility"],
-        r["ema_dist"]
+        row["ema_fast"],
+        row["ema_slow"],
+        row["rsi"],
+        row["returns"],
+        row["volatility"],
+        row["ema_dist"],
     ]]
 
     X = scaler.transform(X)
     X = torch.tensor(X, dtype=torch.float32)
 
     with torch.no_grad():
-        p = model(X).item()
+        raw = model(X).item()
 
-    # controlled confidence expansion
-    p = np.clip(p, 0.1, 0.9)
-    p = 0.5 + (p - 0.5) * 1.8
-    return float(np.clip(p, 0.05, 0.95))
+    # Decompress mid-range confidence
+    gamma = 0.6
+    raw = max(raw, 0.15)
+    expanded = raw ** gamma
+
+    if expanded < 0.5:
+        expanded = 0.5 - (0.5 - expanded) * 1.1
+    else:
+        expanded = 0.5 + (expanded - 0.5) * 1.6
+
+    return float(max(0.1, min(0.9, expanded)))
