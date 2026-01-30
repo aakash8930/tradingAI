@@ -113,7 +113,7 @@ while True:
             qty = (BASE_TRADE_SIZE / price) * size_factor
 
             # ---------- ENTRY ----------
-            if s["pos"] is None and ai > 0.48:
+            if s["pos"] is None and ai > 0.52:
                 s.update({
                     "pos": "LONG",
                     "entry": price,
