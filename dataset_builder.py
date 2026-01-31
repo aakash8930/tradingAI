@@ -1,17 +1,17 @@
+# dataset_builder.py
 import ccxt
 import pandas as pd
 import ta
 
 SYMBOL = "BTC/USDT"
-TIMEFRAME = "1m"
-CANDLES = 4000
+TIMEFRAME = "5m"
+CANDLES = 6000
 
-TP = 0.006
-SL = 0.003
-FUTURE_WINDOW = 20
+TP = 0.008      # 0.8%
+SL = 0.004      # 0.4%
+FUTURE_WINDOW = 24  # 2 hours on 5m
 
 exchange = ccxt.binance({"enableRateLimit": True})
-
 
 def fetch():
     bars = exchange.fetch_ohlcv(SYMBOL, TIMEFRAME, limit=CANDLES)
@@ -19,18 +19,16 @@ def fetch():
         bars, columns=["time","open","high","low","close","volume"]
     )
 
-
 def build_features(df):
     df = df.copy()
-    df["ema_fast"] = ta.trend.EMAIndicator(df["close"],9).ema_indicator()
-    df["ema_slow"] = ta.trend.EMAIndicator(df["close"],21).ema_indicator()
-    df["rsi"] = ta.momentum.RSIIndicator(df["close"],14).rsi()
+    df["ema_fast"] = ta.trend.EMAIndicator(df["close"], 9).ema_indicator()
+    df["ema_slow"] = ta.trend.EMAIndicator(df["close"], 21).ema_indicator()
+    df["rsi"] = ta.momentum.RSIIndicator(df["close"], 14).rsi()
     df["returns"] = df["close"].pct_change()
     df["volatility"] = df["returns"].rolling(10).std()
     df["ema_dist"] = (df["ema_fast"] - df["ema_slow"]) / df["close"]
     df.dropna(inplace=True)
     return df
-
 
 def build_dataset():
     df = build_features(fetch())
@@ -66,7 +64,6 @@ def build_dataset():
     out.to_csv("training_data.csv", index=False)
 
     print(f"✅ Dataset built: {len(out)} rows")
-
 
 if __name__ == "__main__":
     build_dataset()
