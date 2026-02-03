@@ -1,53 +1,70 @@
-import ccxt, ta, time, csv, os, sys
-import pandas as pd
-from datetime import datetime, date
-from ai_predictor import prepare_features, predict_signal
+# main.py
 
-SYMBOLS = ["BTC/USDT","ETH/USDT"]
+import ccxt
+import time
+import csv
+import os
+import sys
+import pandas as pd
+from datetime import datetime
+from ai_predictor import prepare_features, predict_probability
+
+# ================= SETTINGS =================
+SYMBOLS = ["BTC/USDT", "ETH/USDT"]   # add more coins safely later
 TIMEFRAME = "5m"
 
 START_BALANCE = 1000.0
-RISK_PCT = 0.01
+BASE_TRADE_USD = 150.0
 
-STOP_LOSS = 0.006
-TAKE_PROFIT = 0.012
-MAX_HOLD = 18
+STOP_LOSS = 0.012
+MAX_HOLD = 12
+AI_LONG = 0.60
+AI_SHORT = 0.40
 
+# ================= EXCHANGE =================
 exchange = ccxt.binance({"enableRateLimit": True})
 
+# ================= STATE =================
 balance = START_BALANCE
-day_start = START_BALANCE
-current_day = date.today()
 
-state = {s:{"side":None,"entry":0,"qty":0,"hold":0} for s in SYMBOLS}
+state = {
+    s: {"pos": None, "entry": 0.0, "qty": 0.0, "hold": 0}
+    for s in SYMBOLS
+}
 
+# ================= CSV =================
 if not os.path.exists("paper_trades.csv"):
-    with open("paper_trades.csv","w",newline="") as f:
+    with open("paper_trades.csv", "w", newline="") as f:
         csv.writer(f).writerow(
-            ["time","symbol","side","entry","exit","pnl","balance"]
+            ["timestamp","symbol","side","entry","exit","pnl","balance","reason"]
         )
 
-def log_trade(sym, side, entry, exit_p, pnl):
-    with open("paper_trades.csv","a",newline="") as f:
+if not os.path.exists("diagnostics.csv"):
+    with open("diagnostics.csv", "w", newline="") as f:
         csv.writer(f).writerow(
-            [datetime.now(),sym,side,round(entry,2),round(exit_p,2),
-             round(pnl,2),round(balance,2)]
+            ["time","symbol","price","ai","position","balance"]
         )
 
-print("\n🚀 5m AI PAPER TRADING STARTED\n")
+def log_trade(row):
+    with open("paper_trades.csv", "a", newline="") as f:
+        csv.writer(f).writerow(row)
 
+def log_diag(row):
+    with open("diagnostics.csv", "a", newline="") as f:
+        csv.writer(f).writerow(row)
+
+print("\n🚀 5m AI DIAGNOSTIC PAPER TRADING STARTED\n")
+
+# ================= LOOP =================
 while True:
     try:
-        if date.today() != current_day:
-            day_start = balance
-            current_day = date.today()
-
         for symbol in SYMBOLS:
             s = state[symbol]
+            coin = symbol.replace("/USDT", "")
 
             df = pd.DataFrame(
                 exchange.fetch_ohlcv(symbol, TIMEFRAME, limit=200),
-                columns=["t","open","high","low","close","volume"]
+                columns=["time","open","high","low","close","volume"]
             )
 
             df = prepare_features(df)
@@ -55,33 +72,60 @@ while True:
                 continue
 
             price = df.iloc[-1]["close"]
-            signal, conf = predict_signal(df)
+            ai = predict_probability(df)
 
-            print(f"{symbol} | Price={price:.2f} | AI={conf:.2f} | Pos={s['side']}")
+            print(
+                f"{coin} | Price={price:.2f} | AI={ai:.2f} | "
+                f"Pos={s['pos']}"
+            )
 
-            if s["side"] is None and signal != "NONE":
-                risk = balance * RISK_PCT
-                qty = risk / price
-                s.update({"side":signal,"entry":price,"qty":qty,"hold":0})
-                print(f"🟢 ENTER {signal} {symbol}")
+            log_diag([
+                datetime.now(), symbol, round(price,2),
+                round(ai,3), s["pos"], round(balance,2)
+            ])
 
-            elif s["side"]:
+            qty = BASE_TRADE_USD / price
+
+            # -------- ENTRY --------
+            if s["pos"] is None:
+                if ai >= AI_LONG:
+                    s.update({"pos":"LONG","entry":price,"qty":qty,"hold":0})
+                    print(f"🟢 ENTER LONG {coin}")
+
+                elif ai <= AI_SHORT:
+                    s.update({"pos":"SHORT","entry":price,"qty":qty,"hold":0})
+                    print(f"🔴 ENTER SHORT {coin}")
+
+            # -------- MANAGEMENT --------
+            else:
                 s["hold"] += 1
+
                 pnl_pct = (
                     (price - s["entry"]) / s["entry"]
-                    if s["side"]=="LONG"
+                    if s["pos"] == "LONG"
                     else (s["entry"] - price) / s["entry"]
                 )
 
-                if pnl_pct <= -STOP_LOSS or pnl_pct >= TAKE_PROFIT or s["hold"] >= MAX_HOLD:
+                if pnl_pct <= -STOP_LOSS or s["hold"] >= MAX_HOLD:
                     pnl = pnl_pct * s["qty"] * price
                     balance += pnl
-                    log_trade(symbol,s["side"],s["entry"],price,pnl)
-                    print(f"❌ EXIT {symbol} | PnL={pnl:.2f}")
-                    s.update({"side":None,"qty":0,"hold":0})
+
+                    log_trade([
+                        datetime.now(), symbol, s["pos"],
+                        round(s["entry"],2), round(price,2),
+                        round(pnl,2), round(balance,2), "EXIT"
+                    ])
+
+                    print(f"❌ EXIT {coin} | PnL={pnl:.2f}")
+
+                    s.update({"pos":None,"qty":0.0,"hold":0})
 
         time.sleep(300)
 
     except KeyboardInterrupt:
-        print("\n🛑 Stopped")
+        print("\n🛑 Bot stopped")
         sys.exit(0)
+
+    except Exception as e:
+        print("⚠️ Error:", e)
+        time.sleep(30)

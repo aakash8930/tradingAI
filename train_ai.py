@@ -53,3 +53,4 @@ for epoch in range(120):
 
 torch.save(model.state_dict(), "ai_model.pt")
 print("✅ AI model trained & saved")
+

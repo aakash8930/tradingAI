@@ -1,7 +1,20 @@
+# ai_predictor.py
+
 import torch
 import ta
 import joblib
+import pandas as pd
 import numpy as np
+from collections import deque
+
+# ================= MODEL =================
+MODEL_FEATURES = [
+    "ema_fast",
+    "ema_slow",
+    "rsi",
+    "returns",
+    "ema_dist",
+]
 
 class AIModel(torch.nn.Module):
     def __init__(self):
@@ -12,40 +25,47 @@ class AIModel(torch.nn.Module):
             torch.nn.Linear(32, 16),
             torch.nn.ReLU(),
             torch.nn.Linear(16, 1),
-            torch.nn.Sigmoid()
+            torch.nn.Sigmoid(),
         )
 
     def forward(self, x):
         return self.net(x)
 
 model = AIModel()
-model.load_state_dict(torch.load("ai_model.pt", map_location="cpu"))
+
+# 👇 THIS MATCHES YOUR SAVED MODEL
+state_dict = torch.load(
+    "ai_model.pt",
+    map_location="cpu",
+    weights_only=False
+)
+model.load_state_dict(state_dict)
 model.eval()
 
 scaler = joblib.load("scaler.save")
 
-def prepare_features(df):
+# ================= FEATURE ENGINEERING =================
+def prepare_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    df["ema9"] = ta.trend.EMAIndicator(df["close"], 9).ema_indicator()
-    df["ema21"] = ta.trend.EMAIndicator(df["close"], 21).ema_indicator()
+
+    df["ema_fast"] = ta.trend.EMAIndicator(df["close"], 9).ema_indicator()
+    df["ema_slow"] = ta.trend.EMAIndicator(df["close"], 21).ema_indicator()
     df["rsi"] = ta.momentum.RSIIndicator(df["close"], 14).rsi()
-    df["ret"] = df["close"].pct_change()
-    df["vol"] = df["ret"].rolling(10).std()
+    df["returns"] = df["close"].pct_change()
+    df["ema_dist"] = (df["ema_fast"] - df["ema_slow"]) / df["close"]
+
     df.dropna(inplace=True)
     return df
 
-_ai_buffer = []
+# ================= AI PROBABILITY =================
+_ai_buffer = deque(maxlen=300)
 
-def predict_signal(df):
+def predict_probability(df: pd.DataFrame) -> float:
+    if df is None or len(df) == 0:
+        return 0.5
+
     row = df.iloc[-1]
-
-    features = [[
-        row["ema9"],
-        row["ema21"],
-        row["rsi"],
-        row["ret"],
-        row["vol"]
-    ]]
+    features = [[row[f] for f in MODEL_FEATURES]]
 
     features = scaler.transform(features)
     features = torch.tensor(features, dtype=torch.float32)
@@ -54,14 +74,10 @@ def predict_signal(df):
         raw = model(features).item()
 
     _ai_buffer.append(raw)
-    if len(_ai_buffer) > 200:
-        _ai_buffer.pop(0)
 
     mean = np.mean(_ai_buffer)
     std = np.std(_ai_buffer) + 1e-6
     z = (raw - mean) / std
 
-    confidence = float(np.clip(0.5 + z * 0.15, 0.25, 0.75))
-    signal = "LONG" if confidence > 0.52 else "SHORT" if confidence < 0.48 else "NONE"
-
-    return signal, confidence
+    calibrated = 0.5 + z * 0.15
+    return float(np.clip(calibrated, 0.25, 0.75))
