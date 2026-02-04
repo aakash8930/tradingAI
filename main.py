@@ -1,34 +1,27 @@
-# main.py
-
-import ccxt
-import time
-import csv
-import os
-import sys
+import ccxt, ta, time, csv, os, sys
 import pandas as pd
 from datetime import datetime
-from ai_predictor import prepare_features, predict_probability
+from ai_predictor import prepare_features, predict_signal
 
 # ================= SETTINGS =================
-SYMBOLS = ["BTC/USDT", "ETH/USDT"]   # add more coins safely later
-TIMEFRAME = "5m"
+SYMBOLS = ["BTC/USDT", "ETH/USDT"]
 
+EXEC_TF = "5m"
 START_BALANCE = 1000.0
-BASE_TRADE_USD = 150.0
+BASE_RISK = 0.01          # 1% risk per trade
 
-STOP_LOSS = 0.012
-MAX_HOLD = 12
-AI_LONG = 0.60
-AI_SHORT = 0.40
+STOP_LOSS = 0.006         # 0.6%
+TAKE_PROFIT = 0.012       # 1.2%
+TRAIL_AFTER = 0.004       # trail only after +0.4%
+TRAIL_PCT = 0.002         # 0.2% trailing
+MAX_HOLD = 18             # candles
 
-# ================= EXCHANGE =================
 exchange = ccxt.binance({"enableRateLimit": True})
 
 # ================= STATE =================
 balance = START_BALANCE
-
 state = {
-    s: {"pos": None, "entry": 0.0, "qty": 0.0, "hold": 0}
+    s: {"side": None, "entry": 0.0, "qty": 0.0, "best": 0.0, "hold": 0}
     for s in SYMBOLS
 }
 
@@ -36,89 +29,114 @@ state = {
 if not os.path.exists("paper_trades.csv"):
     with open("paper_trades.csv", "w", newline="") as f:
         csv.writer(f).writerow(
-            ["timestamp","symbol","side","entry","exit","pnl","balance","reason"]
+            ["time","symbol","side","entry","exit","pnl","balance","reason"]
         )
 
-if not os.path.exists("diagnostics.csv"):
-    with open("diagnostics.csv", "w", newline="") as f:
-        csv.writer(f).writerow(
-            ["time","symbol","price","ai","position","balance"]
-        )
-
-def log_trade(row):
+def log_trade(sym, side, entry, exit_p, pnl, bal, reason):
     with open("paper_trades.csv", "a", newline="") as f:
-        csv.writer(f).writerow(row)
+        csv.writer(f).writerow(
+            [datetime.now(), sym, side,
+             round(entry, 2), round(exit_p, 2),
+             round(pnl, 2), round(bal, 2), reason]
+        )
 
-def log_diag(row):
-    with open("diagnostics.csv", "a", newline="") as f:
-        csv.writer(f).writerow(row)
+# ================= MAIN LOOP =================
+print("\n🚀 PHASE-2 AI PAPER TRADING STARTED\n")
 
-print("\n🚀 5m AI DIAGNOSTIC PAPER TRADING STARTED\n")
-
-# ================= LOOP =================
 while True:
     try:
-        for symbol in SYMBOLS:
-            s = state[symbol]
-            coin = symbol.replace("/USDT", "")
+        btc_ai = 0.5  # BTC bias reference
 
+        for symbol in SYMBOLS:
             df = pd.DataFrame(
-                exchange.fetch_ohlcv(symbol, TIMEFRAME, limit=200),
-                columns=["time","open","high","low","close","volume"]
+                exchange.fetch_ohlcv(symbol, EXEC_TF, limit=300),
+                columns=["t","open","high","low","close","volume"]
             )
 
             df = prepare_features(df)
-            if len(df) < 50:
+            if len(df) < 100:
                 continue
 
             price = df.iloc[-1]["close"]
-            ai = predict_probability(df)
+            vol = df.iloc[-1]["vol"]
 
-            print(
-                f"{coin} | Price={price:.2f} | AI={ai:.2f} | "
-                f"Pos={s['pos']}"
-            )
+            side, ai = predict_signal(df)
 
-            log_diag([
-                datetime.now(), symbol, round(price,2),
-                round(ai,3), s["pos"], round(balance,2)
-            ])
+            if symbol == "BTC/USDT":
+                btc_ai = ai
 
-            qty = BASE_TRADE_USD / price
+            s = state[symbol]
 
-            # -------- ENTRY --------
-            if s["pos"] is None:
-                if ai >= AI_LONG:
-                    s.update({"pos":"LONG","entry":price,"qty":qty,"hold":0})
-                    print(f"🟢 ENTER LONG {coin}")
+            print(f"{symbol} | Price={price:.2f} | AI={ai:.2f} | Pos={s['side']}")
 
-                elif ai <= AI_SHORT:
-                    s.update({"pos":"SHORT","entry":price,"qty":qty,"hold":0})
-                    print(f"🔴 ENTER SHORT {coin}")
+            # ================= ENTRY =================
+            if s["side"] is None:
+                # ETH trades only when BTC AI is calm
+                if symbol == "ETH/USDT" and btc_ai > 0.62:
+                    continue
 
-            # -------- MANAGEMENT --------
+                if side is None:
+                    continue
+
+                # volatility filter (anti-chop)
+                if vol < df["vol"].quantile(0.2):
+                    continue
+
+                risk = balance * BASE_RISK
+                if symbol == "ETH/USDT":
+                    risk *= 0.4  # ETH size reduction
+
+                qty = risk / price
+
+                s.update({
+                    "side": side,
+                    "entry": price,
+                    "qty": qty,
+                    "best": price,
+                    "hold": 0
+                })
+
+                print(f"🟢 ENTER {side} {symbol}")
+
+            # ================= MANAGEMENT =================
             else:
                 s["hold"] += 1
 
                 pnl_pct = (
                     (price - s["entry"]) / s["entry"]
-                    if s["pos"] == "LONG"
+                    if s["side"] == "LONG"
                     else (s["entry"] - price) / s["entry"]
                 )
 
-                if pnl_pct <= -STOP_LOSS or s["hold"] >= MAX_HOLD:
+                # update best price
+                if s["side"] == "LONG":
+                    s["best"] = max(s["best"], price)
+                    trail_hit = price <= s["best"] * (1 - TRAIL_PCT)
+                else:
+                    s["best"] = min(s["best"], price)
+                    trail_hit = price >= s["best"] * (1 + TRAIL_PCT)
+
+                exit_now = (
+                    pnl_pct <= -STOP_LOSS
+                    or pnl_pct >= TAKE_PROFIT
+                    or (pnl_pct > TRAIL_AFTER and trail_hit)
+                    or ai < 0.55
+                    or s["hold"] >= MAX_HOLD
+                )
+
+                if exit_now:
                     pnl = pnl_pct * s["qty"] * price
                     balance += pnl
 
-                    log_trade([
-                        datetime.now(), symbol, s["pos"],
-                        round(s["entry"],2), round(price,2),
-                        round(pnl,2), round(balance,2), "EXIT"
-                    ])
+                    log_trade(
+                        symbol, s["side"],
+                        s["entry"], price,
+                        pnl, balance, "EXIT"
+                    )
 
-                    print(f"❌ EXIT {coin} | PnL={pnl:.2f}")
+                    print(f"❌ EXIT {symbol} | PnL={pnl:.2f}")
 
-                    s.update({"pos":None,"qty":0.0,"hold":0})
+                    s.update({"side": None, "qty": 0.0, "hold": 0})
 
         time.sleep(300)
 
