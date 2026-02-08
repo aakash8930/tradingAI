@@ -6,6 +6,9 @@ from v2.models.direction import DirectionModel
 
 from v2.risk.limits import RiskLimits, RiskState
 
+from v2.execution.broker import PaperBroker
+from v2.risk.sizing import fixed_fractional_size
+
 
 class TradingRunner:
     """
@@ -24,7 +27,6 @@ class TradingRunner:
         model_path: str,
         scaler_path: str,
         lookback: int = 300,
-
     ):
         self.symbol = symbol
         self.timeframe = timeframe
@@ -36,12 +38,18 @@ class TradingRunner:
         self.risk_limits = RiskLimits()
         self.risk_state = RiskState(starting_balance=1000.0)
 
+        self.broker = PaperBroker()
+        self.max_hold = 20
+
+        self.hold_candles = 0
+        self.risk_per_trade = 0.01
+
     def run_once(self):
         self.risk_state.reset_if_new_day()
 
         if not self.risk_state.trading_allowed(self.risk_limits):
-           print("⛔ Trading halted by risk engine")
-           return
+            print("⛔ Trading halted by risk engine")
+            return
 
         df = self.data.fetch_ohlcv(
             self.symbol,
