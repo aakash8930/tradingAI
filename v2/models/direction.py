@@ -20,16 +20,23 @@ class DirectionModel:
         self.model = self._load_model(model_path)
         self.scaler = joblib.load(scaler_path)
 
-    def _load_model(self, model_path: str):
-        model = torch.nn.Sequential(
-            torch.nn.Linear(5, 32),
-            torch.nn.ReLU(),
-            torch.nn.Linear(32, 16),
-            torch.nn.ReLU(),
-            torch.nn.Linear(16, 1),
-            torch.nn.Sigmoid(),
-        )
+    def _load_model(self, model_path: str) -> torch.nn.Module:
+        class AIModel(torch.nn.Module):
+            def __init__(self):
+                 super().__init__()
+                 self.net = torch.nn.Sequential(
+                     torch.nn.Linear(5, 32),
+                     torch.nn.ReLU(),
+                     torch.nn.Linear(32, 16),
+                     torch.nn.ReLU(),
+                     torch.nn.Linear(16, 1),
+                     torch.nn.Sigmoid(),
+                 )
 
+            def forward(self, x):
+               return self.net(x)
+
+        model = AIModel()
         state_dict = torch.load(model_path, map_location="cpu")
         model.load_state_dict(state_dict)
         model.eval()
