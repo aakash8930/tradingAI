@@ -1,3 +1,5 @@
+# main.py
+
 import ccxt, ta, time, csv, os, sys
 import pandas as pd
 from datetime import datetime
