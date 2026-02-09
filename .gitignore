@@ -32,3 +32,8 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.swp
+
+# Ignore the v1 folder to freeze its state
+v1/
+
+v2/data_outputs/
