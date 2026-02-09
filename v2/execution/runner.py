@@ -1,14 +1,14 @@
 import time
 from datetime import datetime
 
-from v2.data.fetcher import MarketDataFetcher
-from v2.models.direction import DirectionModel
+from data.fetcher import MarketDataFetcher
+from models.direction import DirectionModel
 
-from v2.risk.limits import RiskLimits, RiskState
+from risk.limits import RiskLimits, RiskState
 
-from v2.execution.broker import PaperBroker
-from v2.risk.sizing import fixed_fractional_size
-from v2.logs.logger import TradeLogger
+from execution.broker import PaperBroker
+from risk.sizing import fixed_fractional_size
+from logs.logger import TradeLogger
 
 
 
@@ -53,6 +53,12 @@ class TradingRunner:
 
     def run_once(self):
         self.risk_state.reset_if_new_day()
+
+        print(
+            f"Trades today: {self.risk_state.trades_today} | "
+            f"Daily loss %: {self.risk_state.daily_loss_pct():.2%}"
+        )
+
 
         df = self.data.fetch_ohlcv(
             self.symbol,

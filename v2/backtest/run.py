@@ -1,4 +1,4 @@
-from v2.backtest.engine import BacktestEngine
+from backtest.engine import BacktestEngine
 
 
 if __name__ == "__main__":

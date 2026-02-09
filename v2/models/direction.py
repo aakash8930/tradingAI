@@ -3,7 +3,7 @@ import joblib
 import numpy as np
 from pathlib import Path
 
-from v2.features.technicals import compute_core_features
+from features.technicals import compute_core_features
 
 
 class DirectionModel:
