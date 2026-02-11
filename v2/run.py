@@ -11,7 +11,7 @@ sys.path.insert(0, BASE_DIR)
 if __name__ == "__main__":
     runner = TradingRunner(
         symbol="BTC/USDT",
-        timeframe="5m",
+        timeframe="15m",
         model_path=os.path.join(BASE_DIR, "..", "ai_model.pt"),
         scaler_path=os.path.join(BASE_DIR, "..", "scaler.save"),
     )

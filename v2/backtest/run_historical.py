@@ -7,7 +7,7 @@ from v2.backtest.simulator import HistoricalSimulator
 
 
 SYMBOL = "BTC/USDT"
-TIMEFRAME = "5m"
+TIMEFRAME = "15m"
 CANDLES = 10000  # increase later
 
 

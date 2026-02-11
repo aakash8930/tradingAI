@@ -5,7 +5,7 @@ from v2.backtest.simulator import HistoricalSimulator
 
 
 SYMBOL = "BTC/USDT"
-TIMEFRAME = "5m"
+TIMEFRAME = "15m"
 TOTAL_CANDLES = 20000
 
 TRAIN_SIZE = 8000
