@@ -1,6 +1,5 @@
 import ccxt
 import pandas as pd
-import numpy as np
 
 from v2.backtest.simulator import HistoricalSimulator
 
