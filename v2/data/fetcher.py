@@ -1,8 +1,7 @@
 import ccxt
 import pandas as pd
-from typing import Optional
 
-from features.technicals import compute_core_features
+from v2.features.technicals import compute_core_features
 
 
 class MarketDataFetcher:

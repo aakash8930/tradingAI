@@ -1,9 +1,9 @@
 import torch
 import joblib
 import numpy as np
-from pathlib import Path
 
-from features.technicals import compute_core_features
+from v2.features.technicals import compute_core_features
+
 
 
 class DirectionModel:

@@ -1,11 +1,11 @@
 import os
 import sys
+from v2.execution.runner import TradingRunner
 
 # Ensure v2 is the import root, regardless of where we run from
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 
-from execution.runner import TradingRunner
 
 
 if __name__ == "__main__":

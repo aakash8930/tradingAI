@@ -1,8 +1,8 @@
 import pandas as pd
 from typing import List, Dict
 
-from data.fetcher import MarketDataFetcher
-from models.direction import DirectionModel
+from v2.data.fetcher import MarketDataFetcher
+from v2.models.direction import DirectionModel
 
 
 class BacktestEngine:

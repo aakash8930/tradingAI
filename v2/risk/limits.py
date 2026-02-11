@@ -1,3 +1,5 @@
+# limits.py
+
 from dataclasses import dataclass
 from datetime import date
 
@@ -23,12 +25,15 @@ class RiskState:
         self.daily_pnl = 0.0
         self.weekly_pnl = 0.0
 
-    def reset_if_new_day(self):
-        today = date.today()
-        if today != self.today:
-            self.today = today
+        self.current_date = None
+
+
+    def reset_if_new_day(self, current_date):
+        if self.current_date != current_date:
+            self.current_date = current_date
             self.trades_today = 0
             self.daily_pnl = 0.0
+
 
     def register_trade(self, pnl: float):
         self.trades_today += 1
