@@ -1,0 +1,6 @@
+ccxt
+pandas
+ta
+torch
+scikit-learn
+joblib
