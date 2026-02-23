@@ -1,6 +1,10 @@
-ccxt
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+torch==2.2.2+cpu
+numpy
 pandas
-ta
-torch
 scikit-learn
 joblib
+ccxt
+ta
+requests
