@@ -127,10 +127,10 @@ class HistoricalSimulator:
             side = None
 
             # Stronger AI filter
-            if prob_up >= 0.40 and price > ema200 and atr_pct > 0.003:
+            if prob_up >= 0.40 and price > ema200 and atr_pct > 0.0015:
                 side = "LONG"
 
-            elif prob_up <= 0.25 and price < ema200 and atr_pct > 0.003:
+            elif prob_up <= 0.25 and price < ema200 and atr_pct > 0.0015:
                 side = "SHORT"
 
             if side:

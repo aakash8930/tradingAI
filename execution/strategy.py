@@ -13,9 +13,9 @@ class StrategyEngine:
         model: DirectionModel,
         risk_per_trade: float = 0.01,
         trailing_pct: float = 0.0075,
-        long_prob_threshold: float = 0.50,
-        short_prob_threshold: float = 0.45,
-        min_adx: float = 20.0,
+        long_prob_threshold: float = 0.52,
+        short_prob_threshold: float = 0.48,
+        min_adx: float = 8.0,
     ):
         self.model = model
         self.risk_per_trade = risk_per_trade
@@ -69,13 +69,21 @@ class StrategyEngine:
         atr_pct = atr / price
 
         long_th = self.model.long_threshold
-        short_th = self.model.short_threshold
+        # short_th = self.model.short_threshold
         
-        if prob_up >= long_th and price > ema200 and atr_pct > 0.002 and adx >= self.min_adx:
+        if prob_up >= long_th and price > ema200 and atr_pct > 0.0015 and adx >= self.min_adx:
             return "LONG", prob_up
         
-        if prob_up <= short_th and price < ema200 and atr_pct > 0.002 and adx >= self.min_adx:
-            return "SHORT", prob_up
+        # if prob_up <= short_th and price < ema200 and atr_pct > 0.0015 and adx >= self.min_adx:
+        #     return "SHORT", prob_up
+        
+        print(
+            f"DEBUG | {df.index[-1]} | "
+            f"prob={prob_up:.3f} | "
+            f"ema_ok={price > ema200} | "
+            f"atr_ok={atr_pct:.4f} | "
+            f"adx={adx:.1f}"
+        )
 
         return None, prob_up
 

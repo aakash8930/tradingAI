@@ -49,9 +49,9 @@ class LiveSettings:
     cooldown_minutes: int = 30
     risk_per_trade: float = 0.01
     max_position_notional_pct: float = 0.20
-    long_prob_threshold: float = 0.50
-    short_prob_threshold: float = 0.45
-    min_adx: float = 20.0
+    long_prob_threshold: float = 0.52
+    short_prob_threshold: float = 0.48
+    min_adx: float = 8.0
     take_profit_rr: float = 2.0
     breakeven_rr: float = 1.0
     max_active_positions: int = 2
@@ -99,9 +99,9 @@ class LiveSettings:
             cooldown_minutes=_env_int("ENTRY_COOLDOWN_MINUTES", 30),
             risk_per_trade=_env_float("RISK_PER_TRADE", 0.01),
             max_position_notional_pct=_env_float("MAX_POSITION_NOTIONAL_PCT", 0.20),
-            long_prob_threshold=_env_float("LONG_PROB_THRESHOLD", 0.50),
-            short_prob_threshold=_env_float("SHORT_PROB_THRESHOLD", 0.45),
-            min_adx=_env_float("MIN_ADX", 10.0),
+            long_prob_threshold=_env_float("LONG_PROB_THRESHOLD", 0.52),
+            short_prob_threshold=_env_float("SHORT_PROB_THRESHOLD", 0.48),
+            min_adx=_env_float("MIN_ADX", 8.0),
             take_profit_rr=_env_float("TAKE_PROFIT_RR", 2.0),
             breakeven_rr=_env_float("BREAKEVEN_RR", 1.0),
             max_active_positions=_env_int("MAX_ACTIVE_POSITIONS", 2),
