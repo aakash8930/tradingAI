@@ -3,9 +3,8 @@
 import time
 import json
 from pathlib import Path
-
+from execution.coin_selector import CoinSelector
 from config.live import LiveSettings
-from execution import runner
 from execution.runner import TradingRunner
 
 
@@ -15,8 +14,17 @@ class MultiSymbolTradingSystem:
         self.runners: list[TradingRunner] = []
         self.error_counts: dict[str, int] = {}
         self.disabled_symbols: set[str] = set()
+        
+        selector = CoinSelector(
+            timeframe=settings.timeframe,
+            top_k=settings.max_active_positions + 2,
+        )
 
-        for symbol in settings.symbols:
+        selected_symbols = selector.select(settings.symbols)
+
+        print(f"🔁 Selected symbols: {selected_symbols}")
+
+        for symbol in selected_symbols:
             if self.settings.require_model_quality and not self._model_quality_ok(symbol):
                 print(f"[{symbol}] skipped due to weak validation metrics")
                 continue
