@@ -71,11 +71,11 @@ class StrategyEngine:
         long_th = self.model.long_threshold
         # short_th = self.model.short_threshold
         
-        ema_penalty = 0.02 if price < ema200 else 0.0
+        
 
         if (
-            prob_up >= (long_th + ema_penalty)
-            and atr_pct > 0.0015
+            prob_up >= long_th
+            and atr_pct > 0.0012     # 🔽 looser
             and adx >= self.min_adx
         ):
             return "LONG", prob_up

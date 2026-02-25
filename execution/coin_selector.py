@@ -9,8 +9,8 @@ class CoinSelector:
         timeframe: str = "15m",
         lookback: int = 200,
         top_k: int = 5,
-        min_atr_pct: float = 0.003,
-        min_volume_ratio: float = 1.2,
+        min_atr_pct: float = 0.00,
+        min_volume_ratio: float = 1.0,
     ):
         self.timeframe = timeframe
         self.lookback = lookback
@@ -62,4 +62,10 @@ class CoinSelector:
                 scores[symbol] = score
 
         ranked = sorted(scores, key=scores.get, reverse=True)
+
+        # 🔥 SAFETY FALLBACK (VERY IMPORTANT)
+        if not ranked:
+            print("⚠️ CoinSelector empty → fallback to base symbols")
+            return symbols[: self.top_k]
+
         return ranked[: self.top_k]

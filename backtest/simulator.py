@@ -44,7 +44,7 @@ class HistoricalSimulator:
         self.lowest_price = None
 
     def step(self, window_df: pd.DataFrame):
-
+        
         # Reset daily risk using candle time
         current_time = pd.to_datetime(window_df.iloc[-1]["time"], unit="ms")
         self.risk_state.reset_if_new_day(current_time.date())
