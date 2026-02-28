@@ -10,13 +10,13 @@ from execution.position import Position
 
 class PaperBroker:
     """
-    Simulates order execution.
+    Simulates order execution (paper trading).
     """
 
     def __init__(self):
         self.position: Optional[Position] = None
 
-    def open_position(self, side: str, price: float, qty: float, symbol: Optional[str] = None) -> Position:
+    def open_position(self, side: str, price: float, qty: float, symbol: str | None = None) -> Position:
         self.position = Position(
             side=side,
             entry_price=price,
@@ -25,7 +25,7 @@ class PaperBroker:
         )
         return self.position
 
-    def close_position(self, price: float, symbol: Optional[str] = None) -> float:
+    def close_position(self, price: float, symbol: str | None = None) -> float:
         if self.position is None:
             return 0.0
 
@@ -34,10 +34,29 @@ class PaperBroker:
         return pnl
 
 
+class ShadowBroker(PaperBroker):
+    """
+    Shadow trading broker.
+    Executes ZERO real orders.
+    Mirrors live behavior for validation.
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    def open_position(self, side: str, price: float, qty: float, symbol: str | None = None) -> Position:
+        print(f"[SHADOW] OPEN {side} {symbol} qty={qty:.6f} @ {price:.2f}")
+        return super().open_position(side, price, qty, symbol)
+
+    def close_position(self, price: float, symbol: str | None = None) -> float:
+        pnl = super().close_position(price, symbol)
+        print(f"[SHADOW] CLOSE {symbol} pnl={pnl:.4f}")
+        return pnl
+
+
 class LiveBroker:
     """
-    Executes real market orders through ccxt.
-    Current implementation is spot-safe: LONG only.
+    Executes real market orders via ccxt (spot only, LONG only).
     """
 
     def __init__(
@@ -55,9 +74,7 @@ class LiveBroker:
                 "apiKey": api_key,
                 "secret": api_secret,
                 "enableRateLimit": True,
-                "options": {
-                    "defaultType": "spot",
-                },
+                "options": {"defaultType": "spot"},
             }
         )
 
@@ -69,44 +86,32 @@ class LiveBroker:
 
     def get_balance_usdt(self) -> float:
         balance = self.exchange.fetch_balance()
-        free = balance.get("free", {}).get("USDT")
-        total = balance.get("total", {}).get("USDT")
-        if free is not None:
-            return float(free)
-        if total is not None:
-            return float(total)
-        return 0.0
+        return float(
+            balance.get("free", {}).get("USDT")
+            or balance.get("total", {}).get("USDT")
+            or 0.0
+        )
 
     def _normalize_qty(self, symbol: str, qty: float) -> float:
-        market = self.exchange.market(symbol)
-        normalized = float(self.exchange.amount_to_precision(symbol, qty))
+        qty = float(self.exchange.amount_to_precision(symbol, qty))
+        min_amount = self.exchange.market(symbol).get("limits", {}).get("amount", {}).get("min")
 
-        min_amount = market.get("limits", {}).get("amount", {}).get("min")
-        if min_amount is not None and normalized < float(min_amount):
-            raise ValueError(
-                f"Order qty too small for {symbol}: {normalized} < min {min_amount}"
-            )
+        if min_amount and qty < float(min_amount):
+            raise ValueError(f"Order qty too small for {symbol}")
 
-        return normalized
+        return qty
 
     def _validate_notional(self, symbol: str, qty: float, price: float) -> None:
-        market = self.exchange.market(symbol)
-        min_cost = market.get("limits", {}).get("cost", {}).get("min")
-        if min_cost is None:
-            return
-
-        notional = qty * price
-        if notional < float(min_cost):
-            raise ValueError(
-                f"Order notional too small for {symbol}: {notional:.4f} < min {min_cost}"
-            )
+        min_cost = self.exchange.market(symbol).get("limits", {}).get("cost", {}).get("min")
+        if min_cost and qty * price < float(min_cost):
+            raise ValueError(f"Order notional too small for {symbol}")
 
     def open_position(self, side: str, price: float, qty: float, symbol: str) -> Position:
-        if self.position is not None:
-            raise RuntimeError("Position already open.")
+        if self.position:
+            raise RuntimeError("Position already open")
 
         if side != "LONG":
-            raise ValueError("Live spot broker supports LONG only.")
+            raise ValueError("Live spot broker supports LONG only")
 
         qty = self._normalize_qty(symbol, qty)
         self._validate_notional(symbol, qty, price)
@@ -116,7 +121,7 @@ class LiveBroker:
         filled_qty = float(order.get("filled") or qty)
 
         if filled_qty <= 0:
-            raise RuntimeError(f"Buy order was not filled: {order}")
+            raise RuntimeError("Buy order not filled")
 
         self.position = Position(
             side=side,
@@ -127,7 +132,7 @@ class LiveBroker:
         return self.position
 
     def close_position(self, price: float, symbol: str) -> float:
-        if self.position is None:
+        if not self.position:
             return 0.0
 
         qty = self._normalize_qty(symbol, self.position.qty)

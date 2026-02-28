@@ -1,18 +1,26 @@
+
 # execution/position.py
 
 from dataclasses import dataclass
 from datetime import datetime
 
 
-@dataclass
+@dataclass(slots=True)
 class Position:
-    side: str              # "LONG" or "SHORT"
+    """
+    Represents a single open trading position.
+    """
+    side: str            # "LONG" or "SHORT"
     entry_price: float
     qty: float
     entry_time: datetime
 
-    def pnl(self, price: float) -> float:
+    def pnl(self, exit_price: float) -> float:
+        """
+        Calculate profit / loss at given exit price.
+        """
         if self.side == "LONG":
-            return (price - self.entry_price) * self.qty
-        else:
-            return (self.entry_price - price) * self.qty
+            return (exit_price - self.entry_price) * self.qty
+
+        # SHORT (future-proofing)
+        return (self.entry_price - exit_price) * self.qty

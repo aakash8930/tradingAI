@@ -1,82 +1,56 @@
 # backtest/run_walkforward.py
 
+import sys
+from pathlib import Path
+
 import ccxt
 import pandas as pd
 
-from .simulator import HistoricalSimulator
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
+try:
+    from backtest.simulator import HistoricalSimulator
+except ModuleNotFoundError:
+    from simulator import HistoricalSimulator
 
 
 SYMBOL = "BTC/USDT"
 TIMEFRAME = "15m"
-TOTAL_CANDLES = 50000
+TOTAL_CANDLES = 50_000
 
-TRAIN_SIZE = 8000
-TEST_SIZE = 3000
-
-
-exchange = ccxt.binance({"enableRateLimit": True})
-
-print("Fetching historical data...")
-
-all_bars = []
-since = exchange.milliseconds() - (TOTAL_CANDLES * 5 * 60 * 1000)
-
-while len(all_bars) < TOTAL_CANDLES:
-    bars = exchange.fetch_ohlcv(
-        SYMBOL,
-        TIMEFRAME,
-        since=since,
-        limit=1000,
-    )
-
-    if not bars:
-        break
-
-    all_bars.extend(bars)
-    since = bars[-1][0] + 1
-
-print(f"Fetched {len(all_bars)} candles")
-
-df = pd.DataFrame(
-    all_bars,
-    columns=["time", "open", "high", "low", "close", "volume"],
-)
-
-segments = []
-start = 0
-
-while start + TRAIN_SIZE + TEST_SIZE <= len(df):
-    train_df = df.iloc[start : start + TRAIN_SIZE].copy()
-    test_df = df.iloc[start + TRAIN_SIZE : start + TRAIN_SIZE + TEST_SIZE].copy()
-
-    segments.append((train_df, test_df))
-    start += TEST_SIZE  # rolling forward
+TRAIN_SIZE = 8_000
+TEST_SIZE = 3_000
 
 
-results = []
+def fetch_history() -> pd.DataFrame:
+    exchange = ccxt.binance({"enableRateLimit": True})
+    since = exchange.milliseconds() - TOTAL_CANDLES * 15 * 60 * 1000
 
-for idx, (_, test_df) in enumerate(segments):
-    print(f"\n--- Walk Forward Segment {idx+1} ---")
+    all_bars: list[list] = []
 
-    sim = HistoricalSimulator(
-        model_path="models/ai_model.pt",
-        scaler_path="models/scaler.save",
-        starting_balance=500.0,
+    while len(all_bars) < TOTAL_CANDLES:
+        bars = exchange.fetch_ohlcv(
+            SYMBOL,
+            TIMEFRAME,
+            since=since,
+            limit=1000,
+        )
+        if not bars:
+            break
+
+        all_bars.extend(bars)
+        since = bars[-1][0] + 1
+
+    return pd.DataFrame(
+        all_bars,
+        columns=["time", "open", "high", "low", "close", "volume"],
     )
 
 
-    for i in range(sim.lookback, len(test_df)):
-        window = test_df.iloc[i - sim.lookback : i + 1].copy()
-        sim.step(window)
-
-    trades = pd.DataFrame(sim.trades)
-
-    if len(trades) == 0:
-        print("No trades in this segment.")
-        continue
-
+def compute_metrics(trades: pd.DataFrame) -> dict:
     wins = trades[trades["pnl"] > 0]
     losses = trades[trades["pnl"] <= 0]
 
@@ -89,26 +63,65 @@ for idx, (_, test_df) in enumerate(segments):
     equity = trades["balance"]
     peak = equity.cummax()
     drawdown = (peak - equity) / peak
-    max_dd = drawdown.max()
 
-    print(f"Trades: {len(trades)}")
-    print(f"Win rate: {win_rate:.4f}")
-    print(f"Expectancy: {expectancy:.4f}")
-    print(f"Max DD: {max_dd:.4f}")
-
-    results.append({
-        "segment": idx + 1,
+    return {
         "trades": len(trades),
         "win_rate": win_rate,
         "expectancy": expectancy,
-        "max_dd": max_dd,
-    })
+        "max_dd": drawdown.max(),
+    }
 
 
-print("\n========== SUMMARY ==========")
+def main():
+    print("Fetching historical data...")
+    df = fetch_history()
+    print(f"Fetched {len(df)} candles")
 
-summary = pd.DataFrame(results)
-print(summary)
+    results = []
+    start = 0
+    segment = 1
 
-print("\nAverage Expectancy:", summary["expectancy"].mean())
-print("Worst Drawdown:", summary["max_dd"].max())
+    while start + TRAIN_SIZE + TEST_SIZE <= len(df):
+        test_df = df.iloc[start + TRAIN_SIZE : start + TRAIN_SIZE + TEST_SIZE]
+
+        print(f"\n--- Walk Forward Segment {segment} ---")
+
+        sim = HistoricalSimulator(
+            model_path="models/ai_model.pt",
+            scaler_path="models/scaler.save",
+            starting_balance=500.0,
+        )
+
+        for i in range(sim.lookback, len(test_df)):
+            window = test_df.iloc[i - sim.lookback : i + 1]
+            sim.step(window)
+
+        trades = pd.DataFrame(sim.trades)
+        if trades.empty:
+            print("No trades.")
+        else:
+            metrics = compute_metrics(trades)
+            results.append({"segment": segment, **metrics})
+
+            print(
+                f"Trades={metrics['trades']} | "
+                f"WinRate={metrics['win_rate']:.3f} | "
+                f"Expectancy={metrics['expectancy']:.4f} | "
+                f"MaxDD={metrics['max_dd']:.4f}"
+            )
+
+        start += TEST_SIZE
+        segment += 1
+
+    summary = pd.DataFrame(results)
+    print("\n========== SUMMARY ==========")
+    print(summary)
+
+    if not summary.empty:
+        print("\nAverage Expectancy:", summary["expectancy"].mean())
+        print("Worst Drawdown:", summary["max_dd"].max())
+
+
+if __name__ == "__main__":
+    main()
+

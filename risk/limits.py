@@ -1,61 +1,71 @@
 # risk/limits.py
 
-from dataclasses import dataclass
 from datetime import date
 
 
-@dataclass
 class RiskLimits:
-    max_daily_loss_pct: float = 0.03     # 3%
-    max_weekly_loss_pct: float = 0.06    # 6%
-    max_trades_per_day: int = 10
+    def __init__(
+        self,
+        max_daily_loss_pct: float = 0.03,
+        max_consecutive_losses: int = 3,
+    ):
+        self.max_daily_loss_pct = max_daily_loss_pct
+        self.max_consecutive_losses = max_consecutive_losses
 
 
 class RiskState:
-    """
-    Tracks losses and trade counts.
-    """
-
     def __init__(self, starting_balance: float):
         self.starting_balance = starting_balance
         self.current_balance = starting_balance
 
         self.today = date.today()
-        self.week_start = self.today.isocalendar()[:2]  # (year, week)
-        self.trades_today = 0
-        self.daily_pnl = 0.0
-        self.weekly_pnl = 0.0
+        self.daily_start_balance = starting_balance
 
+        self.consecutive_losses = 0
+        self.trading_blocked = False
 
-    def reset_if_new_day(self, current_date):
-        if self.today != current_date:
+    # ----------------------------
+    # DAILY RESET
+    # ----------------------------
+    def reset_if_new_day(self, current_date: date):
+        if current_date != self.today:
             self.today = current_date
-            self.trades_today = 0
-            self.daily_pnl = 0.0
+            self.daily_start_balance = self.current_balance
+            self.consecutive_losses = 0
+            self.trading_blocked = False
 
-        current_week = current_date.isocalendar()[:2]
-        if self.week_start != current_week:
-            self.week_start = current_week
-            self.weekly_pnl = 0.0
-
-
+    # ----------------------------
+    # REGISTER CLOSED TRADE
+    # ----------------------------
     def register_trade(self, pnl: float):
-        self.trades_today += 1
-        self.daily_pnl += pnl
-        self.weekly_pnl += pnl
         self.current_balance += pnl
 
-    def daily_loss_pct(self) -> float:
-        return max(0.0, -self.daily_pnl / self.starting_balance)
+        if pnl < 0:
+            self.consecutive_losses += 1
+        else:
+            self.consecutive_losses = 0
 
-    def weekly_loss_pct(self) -> float:
-        return max(0.0, -self.weekly_pnl / self.starting_balance)
-
+    # ----------------------------
+    # CHECK IF TRADING ALLOWED
+    # ----------------------------
     def trading_allowed(self, limits: RiskLimits) -> bool:
-        if self.trades_today >= limits.max_trades_per_day:
+        if self.trading_blocked:
             return False
-        if self.daily_loss_pct() >= limits.max_daily_loss_pct:
+
+        # Drawdown kill-switch
+        drawdown = (
+            self.daily_start_balance - self.current_balance
+        ) / self.daily_start_balance
+
+        if drawdown >= limits.max_daily_loss_pct:
+            self.trading_blocked = True
+            print("🛑 DAILY DRAWDOWN KILL-SWITCH TRIGGERED")
             return False
-        if self.weekly_loss_pct() >= limits.max_weekly_loss_pct:
+
+        # Consecutive loss breaker
+        if self.consecutive_losses >= limits.max_consecutive_losses:
+            self.trading_blocked = True
+            print("🛑 CONSECUTIVE LOSS BREAKER TRIGGERED")
             return False
+
         return True

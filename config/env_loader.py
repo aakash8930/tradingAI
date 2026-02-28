@@ -1,3 +1,4 @@
+
 # config/env_loader.py
 
 import os
@@ -9,8 +10,8 @@ def load_env_file(path: str = ".env") -> None:
     if not env_path.exists():
         return
 
-    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
+    for raw in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
 
@@ -20,3 +21,4 @@ def load_env_file(path: str = ".env") -> None:
 
         if key and key not in os.environ:
             os.environ[key] = value
+

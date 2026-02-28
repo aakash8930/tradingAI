@@ -1,20 +1,32 @@
+
 # metrics/performance.py
 
 import pandas as pd
 
 
 def performance_summary(df: pd.DataFrame) -> dict:
+    if df.empty:
+        return {
+            "trades": 0,
+            "win_rate": 0.0,
+            "avg_win": 0.0,
+            "avg_loss": 0.0,
+            "expectancy": 0.0,
+            "max_drawdown": 0.0,
+        }
+
     wins = df[df["pnl"] > 0]
     losses = df[df["pnl"] <= 0]
 
-    win_rate = len(wins) / len(df) if len(df) else 0
-    avg_win = wins["pnl"].mean() if len(wins) else 0
-    avg_loss = losses["pnl"].abs().mean() if len(losses) else 0
+    win_rate = len(wins) / len(df)
+    avg_win = wins["pnl"].mean() if not wins.empty else 0.0
+    avg_loss = losses["pnl"].abs().mean() if not losses.empty else 0.0
 
     expectancy = win_rate * avg_win - (1 - win_rate) * avg_loss
 
-    peak = df["balance"].cummax()
-    drawdown = (peak - df["balance"]) / peak
+    equity = df["balance"]
+    peak = equity.cummax()
+    drawdown = (peak - equity) / peak
     max_dd = drawdown.max()
 
     return {
@@ -23,5 +35,6 @@ def performance_summary(df: pd.DataFrame) -> dict:
         "avg_win": round(avg_win, 2),
         "avg_loss": round(avg_loss, 2),
         "expectancy": round(expectancy, 2),
-        "max_drawdown": round(max_dd, 3),
+        "max_drawdown": round(float(max_dd), 3),
     }
+

@@ -1,58 +1,65 @@
-# data/fetcher.py
 
+#data/fetcher.py
+
+import time
 import ccxt
 import pandas as pd
-
-from features.technicals import compute_core_features
+from ccxt.base.errors import RequestTimeout, NetworkError
 
 
 class MarketDataFetcher:
     """
-    Responsible for:
-    - Fetching OHLCV data
-    - Building training datasets
+    Shared market data fetcher with retry & timeout safety.
     """
 
+    _exchange = None  # 🔑 singleton
+
     def __init__(self, exchange_name: str = "binance"):
-        if exchange_name == "binance":
-            self.exchange = ccxt.binance({"enableRateLimit": True})
-        else:
+        if MarketDataFetcher._exchange is None:
+            MarketDataFetcher._exchange = self._init_exchange(exchange_name)
+
+        self.exchange = MarketDataFetcher._exchange
+
+    def _init_exchange(self, exchange_name: str):
+        if exchange_name != "binance":
             raise ValueError(f"Unsupported exchange: {exchange_name}")
+
+        exchange = ccxt.binance({
+            "enableRateLimit": True,
+            "timeout": 20000,  # 20s
+        })
+
+        # Load markets ONCE
+        exchange.load_markets()
+        return exchange
 
     def fetch_ohlcv(
         self,
         symbol: str,
         timeframe: str,
-        limit: int = 5000,
+        limit: int = 500,
+        retries: int = 3,
     ) -> pd.DataFrame:
-        bars = self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
-        df = pd.DataFrame(
-            bars,
-            columns=["time", "open", "high", "low", "close", "volume"],
-        )
-        return df
 
-    def build_training_dataset(
-        self,
-        symbol: str,
-        timeframe: str,
-        horizon: int = 3,
-        threshold: float = 0.002,
-        limit: int = 5000,
-    ) -> pd.DataFrame:
-        """
-        Builds labeled dataset for AI training.
+        for attempt in range(1, retries + 1):
+            try:
+                bars = self.exchange.fetch_ohlcv(
+                    symbol,
+                    timeframe,
+                    limit=limit,
+                )
 
-        target = 1 if future return > threshold
-        """
+                if not bars:
+                    raise RuntimeError("empty OHLCV")
 
-        df = self.fetch_ohlcv(symbol, timeframe, limit)
-        df = compute_core_features(df)
+                return pd.DataFrame(
+                    bars,
+                    columns=["time", "open", "high", "low", "close", "volume"],
+                )
 
-        df["future_close"] = df["close"].shift(-horizon)
-        df["future_return"] = (df["future_close"] - df["close"]) / df["close"]
-        df["target"] = (df["future_return"] > threshold).astype(int)
+            except (RequestTimeout, NetworkError) as e:
+                if attempt == retries:
+                    raise
+                time.sleep(2 * attempt)
 
-        df.dropna(inplace=True)
-
-        return df
+        raise RuntimeError("fetch_ohlcv failed after retries")
