@@ -10,16 +10,13 @@ from execution.strategy import StrategyEngine
 from execution.shadow_broker import ShadowBroker
 from execution.regime_controller import RegimeController
 from execution.ai_supervisor import AISupervisor
+from execution.market_guard import MarketGuard
 from risk.limits import RiskLimits, RiskState
 from features.technicals import compute_core_features
 from metrics.self_report import DailyAIReport
 
 
 class TradingRunner:
-    """
-    Fully autonomous AI trading runner.
-    """
-
     def __init__(
         self,
         symbol: str,
@@ -33,12 +30,11 @@ class TradingRunner:
         self.symbol = symbol
         self.timeframe = timeframe
         self.lookback = lookback
-        self.mode = mode
 
         self.data = MarketDataFetcher()
 
-        base = DirectionModel.for_symbol(symbol)
-        models = [base]
+        base_model = DirectionModel.for_symbol(symbol)
+        models = [base_model]
         if symbol != "BTC/USDT":
             try:
                 models.append(DirectionModel.for_symbol("BTC/USDT"))
@@ -49,7 +45,8 @@ class TradingRunner:
         self.strategy = StrategyEngine(self.model, risk_per_trade)
 
         self.supervisor = AISupervisor()
-        self.regime = RegimeController()
+        self.regime_ctrl = RegimeController()
+        self.market_guard = MarketGuard()
 
         self.risk_limits = RiskLimits()
         self.risk_state = RiskState(starting_balance_usdt)
@@ -60,80 +57,76 @@ class TradingRunner:
         self.cooldown = timedelta(minutes=cooldown_minutes)
         self.last_trade_time = None
 
-        self.daily_stats = {
+        self.daily = {
             "trades": 0,
             "wins": 0,
             "losses": 0,
             "net_pnl": 0.0,
-            "peak_equity": starting_balance_usdt,
+            "peak": starting_balance_usdt,
         }
 
-        print(f"[AUTONOMOUS AI] Runner active for {symbol}")
+        print(f"[AUTONOMOUS AI] {symbol} ready")
 
-    # ------------------------------------------------
+    # --------------------------------------------------
     def run_once(self):
         df = self.data.fetch_ohlcv(self.symbol, self.timeframe, self.lookback)
         df = compute_core_features(df)
 
         today = datetime.utcnow().date()
-        self.risk_state.reset_if_new_day(today)
 
+        self.risk_state.reset_if_new_day(today)
         self.supervisor.update_equity(self.risk_state.current_balance)
 
-        # ---------------- REGIME ----------------
-        regime = self.regime.detect(df)
-        if not self.regime.trading_allowed(regime):
+        # -------- GLOBAL SAFETY --------
+        if not self.market_guard.allow_trading(
+            balance=self.risk_state.current_balance,
+            today=today,
+        ):
             return
 
-        regime_risk_mult = self.regime.risk_multiplier(regime)
+        regime = self.regime_ctrl.detect(df)
+        if not self.regime_ctrl.trading_allowed(regime):
+            return
 
-        # ---------------- SUPERVISOR ----------------
         decision = self.supervisor.decide()
         if not decision.trade_allowed:
             return
 
-        # ---------------- EXIT ----------------
+        # -------- EXIT --------
         if self.broker.position:
             price = float(df.iloc[-1]["close"])
             pnl = self.broker.close_position(price, self.symbol)
 
+            self.market_guard.register_trade(pnl)
             self.risk_state.register_trade(pnl)
             self.supervisor.register_trade(pnl)
 
-            self.daily_stats["trades"] += 1
-            self.daily_stats["net_pnl"] += pnl
-            self.daily_stats["peak_equity"] = max(
-                self.daily_stats["peak_equity"],
-                self.risk_state.current_balance,
+            self.daily["trades"] += 1
+            self.daily["net_pnl"] += pnl
+            self.daily["peak"] = max(
+                self.daily["peak"], self.risk_state.current_balance
             )
 
             if pnl > 0:
-                self.daily_stats["wins"] += 1
+                self.daily["wins"] += 1
             else:
-                self.daily_stats["losses"] += 1
+                self.daily["losses"] += 1
 
             return
 
-        # ---------------- ENTRY ----------------
-        if not self.risk_state.trading_allowed(self.risk_limits):
-            return
-
+        # -------- ENTRY --------
         if self.last_trade_time and datetime.utcnow() - self.last_trade_time < self.cooldown:
             return
 
-        signal, prob = self.strategy.generate_signal(df)
+        signal, _ = self.strategy.generate_signal(df)
         if not signal:
             return
 
         price = float(df.iloc[-1]["close"])
-        risk_balance = (
-            self.risk_state.current_balance
-            * decision.risk_multiplier
-            * regime_risk_mult
-        )
+        risk_mult = decision.risk_multiplier * self.regime_ctrl.risk_multiplier(regime)
 
         qty = self.strategy.position_size(
-            balance=risk_balance,
+            balance=self.risk_state.current_balance * risk_mult,
             entry_price=price,
             side=signal,
         )
@@ -144,51 +137,47 @@ class TradingRunner:
         self.broker.open_position(signal, price, qty, self.symbol)
         self.last_trade_time = datetime.utcnow()
 
-    # ------------------------------------------------
+    # --------------------------------------------------
     def run_loop(self, sleep_seconds: int = 900):
         print(f"🚀 Autonomous AI Trader running [{self.symbol}]")
 
-        last_report_day = None
+        last_day = None
 
         while True:
             try:
                 self.run_once()
 
                 today = datetime.utcnow().date()
-                if last_report_day != today:
-                    if self.daily_stats["trades"] > 0:
-                        peak = self.daily_stats["peak_equity"]
-                        dd = (
-                            (peak - self.risk_state.current_balance) / peak
-                            if peak > 0
-                            else 0.0
-                        )
+                if last_day != today and self.daily["trades"] > 0:
+                    dd = (
+                        (self.daily["peak"] - self.risk_state.current_balance)
+                        / self.daily["peak"]
+                    )
 
-                        self.report.write(
-                            symbol=self.symbol,
-                            trades=self.daily_stats["trades"],
-                            wins=self.daily_stats["wins"],
-                            losses=self.daily_stats["losses"],
-                            net_pnl=self.daily_stats["net_pnl"],
-                            max_dd=dd,
-                            notes="autonomous-run",
-                        )
+                    self.report.write(
+                        symbol=self.symbol,
+                        trades=self.daily["trades"],
+                        wins=self.daily["wins"],
+                        losses=self.daily["losses"],
+                        net_pnl=self.daily["net_pnl"],
+                        max_dd=dd,
+                        notes="market-guard-active",
+                    )
 
-                    self.daily_stats = {
+                    self.daily = {
                         "trades": 0,
                         "wins": 0,
                         "losses": 0,
                         "net_pnl": 0.0,
-                        "peak_equity": self.risk_state.current_balance,
+                        "peak": self.risk_state.current_balance,
                     }
-                    last_report_day = today
+                    last_day = today
 
                 time.sleep(sleep_seconds)
 
             except KeyboardInterrupt:
                 print("Stopped by user")
                 break
-
             except Exception as e:
                 print("Runner error:", e)
                 time.sleep(30)
